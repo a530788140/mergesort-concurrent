@@ -15,27 +15,27 @@ The strategy to implement merge sort concurrently:
     * Tasks that creates sub-tasks can be allowed to terminated
 
 ## Build
-    ```bash
+   ```bash
     make
-    ```
+   ```
 
 ## Run
-    ```bash
+   ```bash
     ./sort [thread count] [data count]
-        ```
+   ```
         Then input integer data line-by-line
 
 ## bench
    ```bash
     make bench
-    ``` 
-    Generate uniform distributed test files and use different thread number to sort test files
+   ``` 
+        Generate uniform distributed test files and use different thread number to sort test files
 
 ## plot
-    ```bash
+   ```bash
     make plot
-    ```
-    Use gnuplot to plot execution time of thread number
+   ```
+        Use gnuplot to plot execution time of thread number
 
 # Install customized Git pre-commit hooks
 Git hooks are scripts that Git executes before or after events such as:

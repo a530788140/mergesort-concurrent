@@ -1,6 +1,13 @@
+#define  _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <assert.h>
+
+#include <unistd.h>
+#include <pthread.h>
+#include <sys/mman.h>
 
 #include "threadpool.h"
 #include "list.h"
@@ -11,6 +18,19 @@ struct {
     pthread_mutex_t mutex;
     int cut_thread_count;
 } data_context;
+
+static double diff_in_second(struct timespec t1, struct timespec t2)
+{
+    struct timespec diff;
+    if (t2.tv_nsec - t1.tv_nsec < 0) {
+        diff.tv_sec  = t2.tv_sec - t1.tv_sec - 1;
+        diff.tv_nsec = t2.tv_nsec - t1.tv_nsec + 1000000000;
+    } else {
+        diff.tv_sec  = t2.tv_sec - t1.tv_sec;
+        diff.tv_nsec = t2.tv_nsec - t1.tv_nsec;
+    }
+    return (diff.tv_sec + diff.tv_nsec / 1000000000.0);
+}
 
 static llist_t *tmp_list;
 static llist_t *the_list = NULL;
@@ -77,14 +97,14 @@ void merge(void *data)
             task_t *_task = (task_t *) malloc(sizeof(task_t));
             _task->func = merge;
             _task->arg = merge_list(_list, _t);
-            tqueue_push(pool->queue, _task);
+            tqueue_push(pool, _task);
         }
     } else {
         the_list = _list;
         task_t *_task = (task_t *) malloc(sizeof(task_t));
         _task->func = NULL;
-        tqueue_push(pool->queue, _task);
-        list_print(_list);
+        tqueue_push(pool, _task);
+        //list_print(_list);
     }
 }
 
@@ -109,13 +129,13 @@ void cut_func(void *data)
         task_t *_task = (task_t *) malloc(sizeof(task_t));
         _task->func = cut_func;
         _task->arg = _list;
-        tqueue_push(pool->queue, _task);
+        tqueue_push(pool, _task);
 
         /* create new task: right */
         _task = (task_t *) malloc(sizeof(task_t));
         _task->func = cut_func;
         _task->arg = list;
-        tqueue_push(pool->queue, _task);
+        tqueue_push(pool, _task);
     } else {
         pthread_mutex_unlock(&(data_context.mutex));
         merge(merge_sort(list));
@@ -126,10 +146,19 @@ static void *task_run(void *data)
 {
     (void) data;
     while (1) {
-        task_t *_task = tqueue_pop(pool->queue);
+        pthread_mutex_lock(&(pool->mutex));
+        while ( pool->size == 0) {
+            pthread_cond_wait(&(pool->cond), &(pool->mutex));
+        }
+        if (pool->size == 0)
+            break;
+
+        pthread_mutex_unlock(&(pool->mutex));
+        task_t *_task = tqueue_pop(pool);
+
         if (_task) {
             if (!_task->func) {
-                tqueue_push(pool->queue, _task);
+                tqueue_push(pool, _task);
                 break;
             } else {
                 _task->func(_task->arg);
@@ -146,6 +175,10 @@ int main(int argc, char const *argv[])
         printf(USAGE);
         return -1;
     }
+
+    struct timespec start, end;
+    double cpu_time1 ;
+
     thread_count = atoi(argv[1]);
     data_count = atoi(argv[2]);
     max_cut = thread_count * (thread_count <= data_count) +
@@ -157,7 +190,7 @@ int main(int argc, char const *argv[])
     /* FIXME: remove all all occurrences of printf and scanf
      * in favor of automated test flow.
      */
-    printf("input unsorted data line-by-line\n");
+    //printf("input unsorted data line-by-line\n");
     for (int i = 0; i < data_count; ++i) {
         long int data;
         scanf("%ld", &data);
@@ -169,15 +202,28 @@ int main(int argc, char const *argv[])
     data_context.cut_thread_count = 0;
     tmp_list = NULL;
     pool = (tpool_t *) malloc(sizeof(tpool_t));
+
+    clock_gettime(CLOCK_REALTIME, &start);
     tpool_init(pool, thread_count, task_run);
 
     /* launch the first task */
     task_t *_task = (task_t *) malloc(sizeof(task_t));
     _task->func = cut_func;
     _task->arg = the_list;
-    tqueue_push(pool->queue, _task);
+    tqueue_push(pool, _task);
 
     /* release thread pool */
     tpool_free(pool);
+    clock_gettime(CLOCK_REALTIME, &end);
+    cpu_time1 = diff_in_second(start, end);
+    FILE *exe_time;
+    exe_time = fopen("exe_time.txt", "a");
+    if (!exe_time) {
+        printf("ERROR opening input file exe_time.txt\n");
+        exit(0);
+    }
+    fprintf(exe_time, "%d %lf \n", thread_count, cpu_time1);
+    printf("execution time of %d thread : %lf sec\n", thread_count, cpu_time1);
+
     return 0;
 }
